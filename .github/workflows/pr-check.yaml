@@ -1,0 +1,137 @@
+name: PR check
+
+on:
+  workflow_dispatch:
+  # Trigger analysis when pushing in master or pull requests,
+  # and when creating a pull request.
+  push:
+    branches:
+      - master
+      - feature*
+
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+jobs:
+  tests:
+    name: Coverage
+    runs-on: ubuntu-latest
+
+    # Service containers to run with `container-job`
+    services:
+      # Label used to access the service container
+      redis:
+        # Docker Hub image
+        image: redis
+        # Set health checks to wait until redis has started
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          # Maps port 6379 on service container to the host
+          - 6379:6379
+
+    strategy:
+      matrix:
+        node-version: [18.x, 20.x, 22.x]
+        mongoose-version:
+          [
+            [mongoose@6.12.8, bson@^4.7.2],
+            [mongoose@7.6.11, bson@^5.5.0],
+            [mongoose@latest, bson@^6.10.1],
+          ]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # Disabling shallow clone is recommended for improving relevancy of reporting
+          fetch-depth: 0
+
+      - name: Use Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: npm
+
+      - name: Installing dependencies
+        run: npm ci
+
+      - name: Installing ${{ matrix.mongoose-version[0] }} {{ matrix.mongoose-version[1] }}
+        run: npm i ${{ matrix.mongoose-version[0] }} ${{ matrix.mongoose-version[1] }}
+
+      - name: Coverage
+        run: npm run test
+        env:
+          # The hostname used to communicate with the Redis service container
+          REDIS_HOST: localhost
+          # The default Redis port
+          REDIS_PORT: 6379
+
+  sonar:
+    name: Biome, Coverage & Sonar
+    runs-on: ubuntu-latest
+
+    # Service containers to run with `container-job`
+    services:
+      # Label used to access the service container
+      redis:
+        # Docker Hub image
+        image: redis
+        # Set health checks to wait until redis has started
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          # Maps port 6379 on service container to the host
+          - 6379:6379
+
+    strategy:
+      matrix:
+        node-version: [24.x]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # Disabling shallow clone is recommended for improving relevancy of reporting
+          fetch-depth: 0
+
+      - name: Use Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: npm
+
+      - name: Installing dependencies
+        run: npm ci
+
+      - name: Biome
+        run: npm run biome
+
+      - name: Coverage
+        run: npm run test
+        env:
+          # The hostname used to communicate with the Redis service container
+          REDIS_HOST: localhost
+          # The default Redis port
+          REDIS_PORT: 6379
+
+      - name: Scan
+        if: env.SONAR_TOKEN
+        uses: SonarSource/sonarqube-scan-action@master
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        with:
+          args: >
+            -Dsonar.organization=ilovepixelart
+            -Dsonar.projectName=ts-cache-mongoose
+            -Dsonar.projectKey=ilovepixelart_ts-cache-mongoose
+            -Dsonar.javascript.lcov.reportPaths=coverage/lcov.info
+            -Dsonar.sources=src
+            -Dsonar.tests=tests
+            -Dsonar.test.exclusions=tests/**
+            -Dsonar.coverage.exclusions=tests/**
