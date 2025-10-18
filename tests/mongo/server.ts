@@ -1,0 +1,29 @@
+import fs from 'node:fs'
+import { MongoMemoryServer } from 'mongodb-memory-server'
+import mongoose from 'mongoose'
+
+export const server = (dbName: string) => {
+  let mongo: MongoMemoryServer
+  const dbPath = `./tests/mongo/${dbName}`
+
+  const create = async () => {
+    fs.mkdirSync(dbPath, { recursive: true })
+    mongo = await MongoMemoryServer.create({
+      instance: {
+        dbName,
+        dbPath,
+      },
+    })
+
+    const uri = mongo.getUri()
+    await mongoose.connect(uri)
+  }
+
+  const destroy = async () => {
+    await mongoose.connection.dropDatabase()
+    await mongoose.connection.close()
+    await mongo.stop({ doCleanup: true, force: true })
+  }
+
+  return { create, destroy }
+}
